@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
@@ -13,9 +14,10 @@ namespace AutoMapper.Mappers
     {
         private readonly CollectionMapper _collectionMapper = new CollectionMapper();
 
+        public Expression RemovedObjectCallback { get; }
         public IConfigurationProvider ConfigurationProvider { get; set; }
 
-        public static TDestination Map<TSource, TSourceItem, TDestination, TDestinationItem>(TSource source, TDestination destination, ResolutionContext context, IEquivalentComparer equivalentComparer)
+        public static TDestination Map<TSource, TSourceItem, TDestination, TDestinationItem>(TSource source, TDestination destination, ResolutionContext context, IEquivalentComparer equivalentComparer, Action<object> removedObjectCallback)
             where TSource : IEnumerable<TSourceItem>
             where TDestination : ICollection<TDestinationItem>
         {
@@ -58,6 +60,8 @@ namespace AutoMapper.Mappers
             foreach (var removedItem in destList.SelectMany(x => x.Value))
             {
                 destination.Remove(removedItem);
+                if (removedObjectCallback != null)
+                    removedObjectCallback (removedItem);
             }
 
             return destination;
@@ -65,6 +69,11 @@ namespace AutoMapper.Mappers
 
         private static readonly MethodInfo _mapMethodInfo = typeof(EquivalentExpressionAddRemoveCollectionMapper).GetRuntimeMethods().Single(x => x.IsStatic && x.Name == nameof(Map));
         private static readonly ConcurrentDictionary<TypePair, IObjectMapper> _objectMapperCache = new ConcurrentDictionary<TypePair, IObjectMapper>();
+
+        public EquivalentExpressionAddRemoveCollectionMapper (Expression<Action<object>> removedObjectCallback)
+        {
+            RemovedObjectCallback = removedObjectCallback ?? (Expression) Constant (null);
+        }
 
         public override bool IsMatch(TypePair typePair)
         {
@@ -99,7 +108,7 @@ namespace AutoMapper.Mappers
             }
 
             var method = _mapMethodInfo.MakeGenericMethod(sourceExpression.Type, sourceType, destExpression.Type, destType);
-            var map = Call(null, method, sourceExpression, destExpression, contextExpression, Constant(equivalencyExpression));
+            var map = Call(null, method, sourceExpression, destExpression, contextExpression, Constant(equivalencyExpression), RemovedObjectCallback);
 
             var notNull = NotEqual(destExpression, Constant(null));
             var collectionMapperExpression = _collectionMapper.MapExpression(configurationProvider, profileMap, memberMap, sourceExpression, destExpression, contextExpression);
